@@ -1,0 +1,1 @@
+An IRC poll bot! More to come.
