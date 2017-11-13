@@ -4,10 +4,29 @@ IRC Vote/poll Bot.
 An HRio Production.
 """
 
-import re
 import irc.bot
 import irc.strings
+import shlex
 from BotExceptions import BadVoteOption, BadPollIDValue
+
+CMD_VOTE = 'vote'
+CMD_CREATEPOLL = 'createpoll'
+CMD_POLLINFO = 'pollinfo'
+CMD_LIST = 'list'
+CMD_HELP = 'help'
+
+helpStrings = {
+    CMD_HELP: "Help is a help command that helps get you help :).",
+    CMD_CREATEPOLL: "Creates a poll. args format: <pollID> <question> <answers>(1+) "
+                    "PollID is a shortkey to your poll. Make it easy to type. Multiword questions and "
+                    "answers must be quoted. Ex: createpoll pets 'who's better?' dogs cats 'cat dogs'",
+    CMD_POLLINFO: "Print the stats of an existing poll. args format: <pollID>. Ex: pollinfo pets",
+    CMD_VOTE: "Vote in a poll. Args format: <pollID> <answernumber>. Ex: vote pets 1",
+    CMD_LIST: "List existing polls by pollID and question. No args."
+}
+
+defaultHelp = ("PollBot here! Commands are list, createpoll, vote, and pollinfo. "
+               "Do .votebot help <command> for more info.")
 
 
 class Poll(object):
@@ -89,8 +108,8 @@ class VoteBot(irc.bot.SingleServerIRCBot):
         # TODO: move this to dispatch table structure, moving all this stuff into own funcs
         if cmd == "createpoll":
             argsError = ("Not enough arguments supplied for createpoll cmd. Needs at least one answer supplied."
-                         "pollID, question,answers must be in double quotes "
-                         "Ex: .votebot createpoll \"bore\" \"who?\" \"ann?\" ")
+                         "multi-word answers/questions must be in quotes"
+                         "Ex: .votebot createpoll bore \"who is?\" ann? \"could it be me?\"")
             if not cmdArgs:
                 conn.notice(target, argsError)
                 return
@@ -143,11 +162,22 @@ class VoteBot(irc.bot.SingleServerIRCBot):
             self.listPolls(target)
 
         elif cmd == "help":
-            conn.notice(target, "Commands are list, createpoll, vote, and pollinfo")
-            # TODO: help responses for each command
+            self.handleHelp(target, cmdArgs)
 
         else:
             conn.notice(target, "Not understood: " + cmd)
+
+    def handleHelp(self, target, helpArgs):
+        conn = self.connection
+        if not helpArgs:
+            conn.notice(target, defaultHelp)
+            return
+        parsedArg = shlex.split(helpArgs)[0]
+        if parsedArg not in helpStrings.keys():
+            conn.notice(target, "No such command.")
+            return
+        helpMessage = helpStrings[parsedArg]
+        conn.notice(target, helpMessage)
 
     def handleCreatePoll(self, pollID, question, answers, creator):
         """register a poll to the polls dict."""
@@ -202,11 +232,10 @@ class VoteBot(irc.bot.SingleServerIRCBot):
 
     def parseCreatePollArgs(self, pollArgs):
         """
-        Poll args should come in form [pollID] [question] [options](variable #). They need to be quoted.
-        Double quotes required, for now. Example: "time" "What time is it?" "3pm" "4pm" "midnight"
+        Poll args should come in form [pollID] [question] [options](variable #). Question/answers
+        should be quoted in they are multi-word: Example: time "What time is it?" 3pm "4 o clock"
         """
-        stringRegex = '"([^"]*)"'
-        parsedArgs = re.findall(stringRegex, pollArgs)
+        parsedArgs = shlex.split(pollArgs)
         if len(parsedArgs) < 3:
             print("not enough args for createpoll cmd")  # switch to log
             raise ValueError
