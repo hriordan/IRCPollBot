@@ -30,9 +30,9 @@ defaultHelp = ("PollBot here! Commands are list, createpoll, vote, and pollinfo.
 
 
 class Poll(object):
-    # answers should be list of questions
     pollIDMaxLen = 10
 
+    # Answer should be list of strings
     def __init__(self, question, pollID, creator, answers=[]):
         # TODO: associate poll with channel
         self.question = question
@@ -43,6 +43,7 @@ class Poll(object):
             self.answers[num] = AnswerOption(answer, num)
 
     def addAnswer(self, answer):
+        """Add an answer to an existing poll"""
         pass
 
     def voteForAnswer(self, answerEnum):
@@ -93,11 +94,10 @@ class VoteBot(irc.bot.SingleServerIRCBot):
         return
 
     def do_command(self, event, cmdInput):
-        nick = event.source.nick
+        """parse initial command input and pass to handlers"""
         target = event.target
         conn = self.connection
 
-        # ideally in form cmd args
         inputs = cmdInput.split(' ', 1)
         cmd = inputs[0]
         if len(inputs) < 2:
@@ -105,85 +105,88 @@ class VoteBot(irc.bot.SingleServerIRCBot):
         else:
             cmdArgs = inputs[1]
 
-        # TODO: move this to dispatch table structure, moving all this stuff into own funcs
+        # TODO: move this to dispatch table.
         if cmd == "createpoll":
-            argsError = ("Not enough arguments supplied for createpoll cmd. Needs at least one answer supplied."
-                         "multi-word answers/questions must be in quotes"
-                         "Ex: .votebot createpoll bore \"who is?\" ann? \"could it be me?\"")
-            if not cmdArgs:
-                conn.notice(target, argsError)
-                return
-            try:
-                pollID, question, answers = self.parseCreatePollArgs(cmdArgs)
-            except ValueError:
-                conn.notice(target, argsError)
-                return
-            except BadPollIDValue as err:
-                conn.notice(target, "Invalid Poll ID %s. Must be %s chars or fewer and not already in use" %
-                                    (err.args[0], Poll.pollIDMaxLen))
-                return
-
-            self.handleCreatePoll(pollID, question, answers, nick)
-            conn.notice(target, "I created a poll with ID %s" % pollID)
-            self.displayPollInfo(target, pollID)
-
+            self.handleCreatePoll(event, cmdArgs)
         elif cmd == "pollinfo":
-            if not cmdArgs:
-                conn.notice(target, "No arguments supplied for pollinfo cmd. Need a pollID")
-                return
-            pollID = self.parsePollInfoArgs(cmdArgs)
-            self.displayPollInfo(target, pollID)
-
+            self.handlePollInfo(event, cmdArgs)
         elif cmd == "vote":
-            if not cmdArgs:
-                conn.notice(target, "No arguments supplied for vote cmd. Should <pollid> <answerNumber>")
-                return
-            try:
-                pollID, voteAnswer = self.parseVoteArgs(cmdArgs)
-            except ValueError:
-                conn.notice(target, "Not enough arguments supplied for vote cmd. Should be <pollid> <answerNumber>")
-                return
-            except BadVoteOption:
-                conn.notice(target, "Vote option must be an integer")
-                return
-
-            poll = self.polls.get(pollID)
-            if not poll:
-                conn.notice(target, "No such poll: %s" % pollID)
-                return
-            try:
-                answer = poll.voteForAnswer(voteAnswer)
-            except BadVoteOption:
-                conn.notice(target, "no such option %d for poll %s" % (voteAnswer, pollID))
-                return
-            conn.notice(target, "Successful Vote. Option %d: '%s' now has %d votes." % (voteAnswer, answer.answer, answer.count))
-
+            self.handleVote(event, cmdArgs)
         elif cmd == "list":
-            self.listPolls(target)
-
+            self.handleList(event, cmdArgs)
         elif cmd == "help":
-            self.handleHelp(target, cmdArgs)
-
+            self.handleHelp(event, cmdArgs)
         else:
             conn.notice(target, "Not understood: " + cmd)
 
-    def handleHelp(self, target, helpArgs):
-        conn = self.connection
-        if not helpArgs:
-            conn.notice(target, defaultHelp)
-            return
-        parsedArg = shlex.split(helpArgs)[0]
-        if parsedArg not in helpStrings.keys():
-            conn.notice(target, "No such command.")
-            return
-        helpMessage = helpStrings[parsedArg]
-        conn.notice(target, helpMessage)
+    # command handlers
 
-    def handleCreatePoll(self, pollID, question, answers, creator):
-        """register a poll to the polls dict."""
-        newPoll = Poll(question, pollID, creator, answers)
+    def handleVote(self, event, cmdArgs):
+        conn = self.connection
+        target = event.target
+        if not cmdArgs:
+            conn.notice(target, "No arguments supplied for vote cmd. Should <pollid> <answerNumber>")
+            return
+        try:
+            pollID, voteAnswer = self.parseVoteArgs(cmdArgs)
+        except ValueError:
+            conn.notice(target, "Not enough arguments supplied for vote cmd. Should be <pollid> <answerNumber>")
+            return
+        except BadVoteOption:
+            conn.notice(target, "Vote option must be an integer")
+            return
+
+        poll = self.polls.get(pollID)
+        if not poll:
+            conn.notice(target, "No such poll: %s" % pollID)
+            return
+        try:
+            answer = poll.voteForAnswer(voteAnswer)
+        except BadVoteOption:
+            conn.notice(target, "no such option %d for poll %s" % (voteAnswer, pollID))
+            return
+
+        conn.notice(target, "Successful Vote. Option %d: '%s' now has %d votes." % (voteAnswer, answer.answer, answer.count))
+
+    def handleCreatePoll(self, event, cmdArgs):
+        nick = event.source.nick
+        target = event.target
+        conn = self.connection
+        argsError = ("Not enough arguments supplied for createpoll cmd. Needs at least one answer supplied."
+                     "multi-word answers/questions must be in quotes"
+                     "Ex: .votebot createpoll bore 'who is?' ann? 'could it be me?'")
+
+        if not cmdArgs:
+            conn.notice(target, argsError)
+            return
+
+        try:
+            pollID, question, answers = self.parseCreatePollArgs(cmdArgs)
+        except ValueError:
+            conn.notice(target, argsError)
+            return
+        except BadPollIDValue as err:
+            conn.notice(target, "Invalid Poll ID %s. Must be %s chars or fewer and not already in use" %
+                                (err.args[0], Poll.pollIDMaxLen))
+            return
+
+        newPoll = Poll(question=question,
+                       pollID=pollID,
+                       creator=nick,
+                       answers=answers)
+
         self.polls[pollID] = newPoll
-        print("created poll %s" % pollID)
+        conn.notice(target, "I created a poll with ID %s" % pollID)
+        self.displayPollInfo(target, pollID)
+
+    def handlePollInfo(self, event, cmdArgs):
+        conn = self.connection
+        target = event.target
+        if not cmdArgs:
+            conn.notice(target, "No arguments supplied for pollinfo cmd. Need a pollID")
+            return
+        pollID = cmdArgs.split()[0]
+        self.displayPollInfo(target, pollID)
 
     def displayPollInfo(self, target, pollID):
         """msg channel/nick a given poll's info."""
@@ -201,15 +204,43 @@ class VoteBot(irc.bot.SingleServerIRCBot):
                                                                                 'answer': answer.answer,
                                                                                 'votes': answer.count})
 
-    def listPolls(self, channel):
-        """list all available poll IDs to a given channel"""
+    def handleHelp(self, event, cmdArgs):
+        target = event.target
+        conn = self.connection
+        if not cmdArgs:
+            conn.notice(target, defaultHelp)
+            return
+        parsedArg = shlex.split(cmdArgs)[0]
+        if parsedArg not in helpStrings.keys():
+            conn.notice(target, "No such command.")
+            return
+        helpMessage = helpStrings[parsedArg]
+        conn.notice(target, helpMessage)
+
+    def handleList(self, event, cmdArgs):
+        """list all available polls by ID to a given channel"""
+        target = event.target
         conn = self.connection
         if len(self.polls) == 0:
-            conn.notice(channel, "No open polls.")
+            conn.notice(target, "No open polls.")
             return
-        conn.notice(channel, "Open Polls:")
+        conn.notice(target, "Open Polls:")
         for pollID in self.polls.keys():
-            conn.notice(channel, "PollID %s: '%s'," % (pollID, self.polls[pollID].question))
+            conn.notice(target, "PollID %s: '%s'," % (pollID, self.polls[pollID].question))
+
+    # Parsing helpers
+
+    def parseCreatePollArgs(self, cmdArgs):
+        """Poll args should come in form [pollID] [question] [options](variable #). Question/answers
+           should be quoted in they are multi-word: Example: time "What time is it?" 3pm "4 o clock" """
+        parsedArgs = shlex.split(cmdArgs)
+        if len(parsedArgs) < 3:
+            raise ValueError
+        pollID = parsedArgs[0]
+        if len(pollID) > Poll.pollIDMaxLen or pollID in self.polls.keys():
+            raise BadPollIDValue(pollID)
+        question, answers = (parsedArgs[1], parsedArgs[2:])
+        return (pollID, question, answers)
 
     @staticmethod
     def parseVoteArgs(voteArgs):
@@ -224,27 +255,6 @@ class VoteBot(irc.bot.SingleServerIRCBot):
         except ValueError:
             raise BadVoteOption
         return (pollID, int(ansEnum))
-
-    @staticmethod
-    def parsePollInfoArgs(infoArgs):
-        """one argument, pollID"""
-        return infoArgs.split()[0]
-
-    def parseCreatePollArgs(self, pollArgs):
-        """
-        Poll args should come in form [pollID] [question] [options](variable #). Question/answers
-        should be quoted in they are multi-word: Example: time "What time is it?" 3pm "4 o clock"
-        """
-        parsedArgs = shlex.split(pollArgs)
-        if len(parsedArgs) < 3:
-            print("not enough args for createpoll cmd")  # switch to log
-            raise ValueError
-        pollID = parsedArgs[0]
-        if len(pollID) > Poll.pollIDMaxLen or pollID in self.polls.keys():
-            print("bad pollID")
-            raise BadPollIDValue(pollID)
-        question, answers = (parsedArgs[1], parsedArgs[2:])
-        return (pollID, question, answers)
 
 
 def main():
