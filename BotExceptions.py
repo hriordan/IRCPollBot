@@ -11,3 +11,8 @@ class BadVoteOption(Exception):
 class BadPollIDValue(Exception):
     """PollID is malformed or already in use"""
     pass
+
+
+class HostAlreadyVoted(Exception):
+    """host-user tried to vote in a poll they already voted in"""
+    pass

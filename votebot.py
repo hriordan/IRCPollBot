@@ -7,7 +7,9 @@ An HRio Production.
 import irc.bot
 import irc.strings
 import shlex
-from BotExceptions import BadVoteOption, BadPollIDValue
+from BotExceptions import (BadVoteOption,
+                           BadPollIDValue,
+                           HostAlreadyVoted)
 
 CMD_VOTE = 'vote'
 CMD_CREATEPOLL = 'createpoll'
@@ -30,6 +32,7 @@ defaultHelp = ("PollBot here! Commands are list, createpoll, vote, and pollinfo.
 
 
 class Poll(object):
+    # TODO: pull from config
     pollIDMaxLen = 10
 
     # Answer should be list of strings
@@ -38,6 +41,8 @@ class Poll(object):
         self.question = question
         self.pollID = pollID
         self.creator = creator
+        # voter hostnames saved here to track who voted
+        self.alreadyVotedHosts = set()
         self.answers = {}
         for num, answer in enumerate(answers, start=1):
             self.answers[num] = AnswerOption(answer, num)
@@ -46,12 +51,16 @@ class Poll(object):
         """Add an answer to an existing poll"""
         pass
 
-    def voteForAnswer(self, answerEnum):
-        # TODO: track if someone (by host) has already voted in a poll.
+    def voteForAnswer(self, answerEnum, voterHost):
+        print(voterHost)
+        if voterHost in self.alreadyVotedHosts:
+            raise HostAlreadyVoted
+
         answer = self.answers.get(answerEnum)
         if not answer:
             raise BadVoteOption
         answer.count += 1
+        self.alreadyVotedHosts.add(voterHost)
         return answer
 
     def closePoll(self):
@@ -124,6 +133,8 @@ class VoteBot(irc.bot.SingleServerIRCBot):
     def handleVote(self, event, cmdArgs):
         conn = self.connection
         target = event.target
+        # source is in form "nick!unixuser@hostname"
+        voterHost = event.source.split('!', 1)[1].split('@', 1)[1]
         if not cmdArgs:
             conn.notice(target, "No arguments supplied for vote cmd. Should <pollid> <answerNumber>")
             return
@@ -141,9 +152,12 @@ class VoteBot(irc.bot.SingleServerIRCBot):
             conn.notice(target, "No such poll: %s" % pollID)
             return
         try:
-            answer = poll.voteForAnswer(voteAnswer)
+            answer = poll.voteForAnswer(voteAnswer, voterHost)
         except BadVoteOption:
             conn.notice(target, "no such option %d for poll %s" % (voteAnswer, pollID))
+            return
+        except HostAlreadyVoted:
+            conn.notice(target, "user %s, you have already voted in this poll." % event.source)
             return
 
         conn.notice(target, "Successful Vote. Option %d: '%s' now has %d votes." % (voteAnswer, answer.answer, answer.count))
@@ -258,6 +272,7 @@ class VoteBot(irc.bot.SingleServerIRCBot):
 
 
 def main():
+    # TODO: pull most info here from config file
     debug = False # TODO: get from cmdline arg
     import sys
     if len(sys.argv) != 4:
